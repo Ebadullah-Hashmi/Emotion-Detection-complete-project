@@ -1,69 +1,66 @@
-import streamlit as st
+# Import necessary libraries
+from keras.models import load_model
 import cv2
 import numpy as np
-import os
-import gdown
-import av
-from keras.models import load_model
-from streamlit_webrtc import webrtc_streamer
 
-st.title("Live Emotion Detection")
-st.write("Camera permission allow karein aur START par click karein.")
+# Initialize the face classifier with the Haar Cascade model for face detection
+face_classifier = cv2.CascadeClassifier(r'haarcascade_frontalface_default.xml')
 
-# --- 1. Model Loading (with Google Drive Download) ---
-# st.cache_resource is liye use kiya taake model baar baar load/download na ho
-@st.cache_resource
-def load_emotion_model():
-    model_path = 'Custom_CNN_model.keras'
-    if not os.path.exists(model_path):
-        st.info("Downloading model from Google Drive, please wait...")
-        # APNI GOOGLE DRIVE FILE ID YAHAN PASTE KAREIN:
-        file_id = '1ltv5mD7xsRYNBnPMm78jbGtJtoBsKHPq' 
-        url = f'https://drive.google.com/uc?id={file_id}'
-        gdown.download(url, model_path, quiet=False)
-    return load_model(model_path)
+# Load the pre-trained emotion classification model
+# Uncomment the model you want to use and make sure the path is correct
+classifier = load_model(r'Custom_CNN_model.keras')
+# classifier = load_model(r'Final_Resnet50_Best_model.keras')
 
-classifier = load_emotion_model()
+# Define the list of emotion labels
 emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
 
-# --- 2. Face Classifier Setup ---
-# cv2.data.haarcascades use kiya hai taake XML file ka error na aaye
-face_classifier = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+# Start capturing video from the webcam (device 0 by default)
+cap = cv2.VideoCapture(0)
 
-# --- 3. Live Video Frame Processor ---
-def video_frame_callback(frame):
-    # WebRTC se aane wale frame ko OpenCV format (numpy array) mein convert karein
-    img = frame.to_ndarray(format="bgr24")
+# Continuous loop for live video feed
+while True:
+    # Read each frame from the video capture
+    _, frame = cap.read()
 
-    # Convert the frame to grayscale for face detection
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    faces = face_classifier.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
+    # Convert the frame to grayscale for the face detection
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Detect faces in the grayscale frame
+    faces = face_classifier.detectMultiScale(gray)
 
     # Process each face detected
     for (x, y, w, h) in faces:
-        cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 255), 2)
+        # Draw a rectangle around each detected face
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 255), 2)
+
+        # Extract the region of interest (ROI) as the face area from the grayscale frame
         roi_gray = gray[y:y+h, x:x+w]
+        # Resize the ROI to the size expected by the model (48x48 pixels in this case)
         roi_gray = cv2.resize(roi_gray, (48, 48), interpolation=cv2.INTER_AREA)
 
+        # Proceed if the ROI is not empty
         if np.sum([roi_gray]) != 0:
-            roi = roi_gray.astype('float') / 255.0
-            roi = np.expand_dims(roi, axis=0)
+            roi = roi_gray.astype('float') / 255.0  # Normalize pixel values
+            roi = np.expand_dims(roi, axis=0)  # Add batch dimension
 
-            # Predict the emotion
+            # Predict the emotion of the face using the pre-trained model
             prediction = classifier.predict(roi)[0]
             label = emotion_labels[prediction.argmax()]
-            label_position = (x, y - 10)
+            label_position = (x, y)
 
-            cv2.putText(img, label, label_position, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            # Display the predicted emotion label on the frame
+            cv2.putText(frame, label, label_position, cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         else:
-            cv2.putText(img, 'No Faces', (30, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            # Display message if no faces are detected
+            cv2.putText(frame, 'No Faces', (30, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    # Processed frame wapis return karein live screen ke liye
-    return av.VideoFrame.from_ndarray(img, format="bgr24")
+    # Show the frame with the detected faces and emotion labels
+    cv2.imshow('Emotion Detector', frame)
 
-# --- 4. Streamlit WebRTC Component ---
-webrtc_streamer(
-    key="emotion-detection", 
-    video_frame_callback=video_frame_callback,
-    media_stream_constraints={"video": True, "audio": False} # Sirf video chahiye, audio nahi
-)
+    # Break the loop if 'q' is pressed
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Release the video capture and destroy all OpenCV windows
+cap.release()
+cv2.destroyAllWindows()
