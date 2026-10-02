@@ -1,5 +1,5 @@
 streamlit
-tensorflow
+tensorflow-cpu
 keras
 numpy==1.26.4
 opencv-python-headless
